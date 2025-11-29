@@ -43,6 +43,12 @@ export default function LandingPage() {
             Control your medical records with your BSV wallet. Grant access to providers and pharmacies
             with complete transparency and security.
           </p>
+          <p className="text-sm text-slate-300 mb-8 justify-content-center">
+            One signature to control them all.<br/>
+            One signature to find their health data.<br/>
+            One sgnature to modify them,<br/>
+            and in the blockchain bind them.
+          </p>
           <div className="flex flex-wrap gap-4">
             {/* Primary CTA: Connect Wallet */}
             <Button

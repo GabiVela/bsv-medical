@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Wallet, LogOut, Copy, Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useWallet } from "@/context/wallet-context"
+import { useRouter } from 'next/navigation'
 
 export function WalletButton() {
   const {
@@ -31,6 +32,14 @@ export function WalletButton() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const router = useRouter()
+
+  useEffect(() => {
+    if (isConnected && walletAddress) {
+      router.push('/dashboard')
+    }
+  }, [isConnected, walletAddress])
+
   if (!isConnected) {
     return (
       <Button onClick={connectWallet} disabled={isConnecting} className="gap-2">
@@ -48,7 +57,7 @@ export function WalletButton() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="gap-2 bg-transparent">
+        <Button variant="outline" className="gap-2 bg-transparent text-white">
           <div className="w-2 h-2 rounded-full bg-green-500" />
           {label}
         </Button>
