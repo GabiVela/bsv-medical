@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Shield, Activity, RefreshCw, FileText, Loader2, Eye, AlertTriangle } from "lucide-react"
 
 import { useWallet } from "@/context/wallet-context"
@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button"
 
 // BSV SDK imports
 import { Utils, Script, PublicKey } from "@bsv/sdk"
+
+import { Buffer } from 'buffer'
+globalThis.Buffer = Buffer; // Fix browser Buffe
+
 // The basket used for ON-CHAIN storage in the Doctor's code
 const ON_CHAIN_BASKET = "medical-records-on-chain";
 const ON_CHAIN_PROTOCOL_PREFIX = "medichain"; // The identifier placed before the data in the OP_RETURN script
@@ -45,6 +49,41 @@ export default function PatientDashboardPage() {
     walletAddress && walletAddress.length > 18
       ? `${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}`
       : walletAddress || "Not connected"
+
+    const useTTS = () => {
+      const [isPlaying, setIsPlaying] = useState(false);
+      
+      const speak = useCallback(async (text: string) => {
+        if (isPlaying) return;
+        
+        try {
+          setIsPlaying(true);
+          const response = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voiceId: '21m00Tcm4TlvDq8ikWAM' })
+          });
+          
+          if (!response.ok) throw new Error('TTS failed');
+          
+          const audioBlob = await response.blob();
+          const audio = new Audio();
+          audio.src = URL.createObjectURL(audioBlob);
+          await audio.play();
+          
+          audio.onended = () => setIsPlaying(false);
+          audio.onerror = () => setIsPlaying(false);
+          
+        } catch (error) {
+          console.error('TTS Error:', error);
+          setIsPlaying(false);
+        }
+      }, [isPlaying]);
+      
+      return { speak, isPlaying };
+    };
+
+  const { speak, isPlaying } = useTTS();
 
 // ⬆️ MAKE SURE YOU HAVE THESE IMPORTS AT THE TOP
   const loadRecords = async () => {
@@ -316,20 +355,33 @@ export default function PatientDashboardPage() {
 
         {/* Viewer */}
         {selectedRecord && (
-          <section className="bg-slate-800/60 border border-slate-700 rounded-xl p-6">
-            <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Decrypted Record: {selectedRecord.pointer.recordType}
-            </h2>
-            <p className="text-xs text-amber-300 mb-4">
-                This data was retrieved directly from the immutable BSV transaction script (OP_RETURN).
-            </p>
+        <section className="bg-slate-800/60 border border-slate-700 rounded-xl p-6">
+          <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            Decrypted Record: {selectedRecord.pointer.recordType}
+          </h2>
+          {/* ✅ BOTÓN TTS - AHORA isPlaying ESTÁ DISPONIBLE */}
+          <div className="flex gap-2 mb-4">
+            <Button 
+              size="sm" 
+              onClick={() => speak(selectedRecord.rawJson)} 
+              disabled={isPlaying}
+              className="flex items-center gap-2"
+            >
+              {isPlaying ? <Loader2 className="w-4 h-4 animate-spin" /> : '🔊'}
+              {isPlaying ? 'Playing...' : 'Read Aloud'}
+            </Button>
+          </div>
+          
+          <p className="text-xs text-amber-300 mb-4">
+            This data was retrieved directly from the immutable BSV transaction script (OP_RETURN).
+          </p>
 
-            <pre className="bg-slate-900/80 p-4 rounded border border-slate-700 text-[11px] whitespace-pre-wrap">
-              {selectedRecord.rawJson}
-            </pre>
-          </section>
-        )}
+          <pre className="bg-slate-900/80 p-4 rounded border border-slate-700 text-[11px] whitespace-pre-wrap">
+            {selectedRecord.rawJson}
+          </pre>
+        </section>
+      )}
       </main>
     </div>
   )
