@@ -46,17 +46,19 @@ export default function PatientDashboardPage() {
       ? `${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}`
       : walletAddress || "Not connected"
 
-  const loadRecords = async () => {
+const loadRecords = async () => {
     setError(null)
     setSelectedRecord(null)
 
-    if (!walletClient || !walletAddress) {
+    if (!walletClient) {
       setError("Please connect your wallet to load your records.")
       return
     }
 
     try {
       setLoadingList(true)
+      console.log("🔍 Debug: Fetching records from basket:", ON_CHAIN_BASKET);
+      console.log("👤 Debug: My Wallet Address:", walletAddress);
 
       // 1️⃣ List all records from the dedicated ON-CHAIN basket
       const res = await walletClient.listOutputs({
@@ -64,6 +66,8 @@ export default function PatientDashboardPage() {
         includeCustomInstructions: true,
         limit: 50,
       })
+      
+      console.log("📦 Debug: Raw response from wallet:", res);
 
       const pointers: RecordPointer[] = (res.outputs || [])
         .map((out: any) => {
@@ -73,6 +77,7 @@ export default function PatientDashboardPage() {
           } catch (e) {
             console.warn("Failed to parse customInstructions:", e)
           }
+          // If no metadata, skip
           if (!meta) return null
 
           const [txid, voutStr] = String(out.outpoint || "").split(".")
@@ -81,18 +86,16 @@ export default function PatientDashboardPage() {
           let encryptedDataBuffer: Buffer | null = null;
           
           try {
-            // 2️⃣ EXTRACT THE ENCRYPTED DATA FROM THE LOCKING SCRIPT
+            // 2️⃣ EXTRACT THE ENCRYPTED DATA
             const script = Script.fromHex(out.lockingScript);
-            
-            // The doctor's code put the data after OP_RETURN and the 'medichain' protocol identifier.
-            // We expect the script to look like: OP_0 OP_RETURN [medichain] [data]
-            // We look for the raw data push that follows the 'medichain' identifier.
             const scriptChunks = script.chunks;
+            
+            // Find the index of the protocol prefix
             const dataStartIndex = scriptChunks.findIndex(
               (chunk) => chunk.buf && chunk.buf.toString('utf8') === ON_CHAIN_PROTOCOL_PREFIX
             );
 
-            // The encrypted data should be the chunk immediately following the 'medichain' identifier
+            // Grab the chunk immediately after
             if (dataStartIndex !== -1 && scriptChunks[dataStartIndex + 1] && scriptChunks[dataStartIndex + 1].buf) {
               encryptedDataBuffer = scriptChunks[dataStartIndex + 1].buf;
             }
@@ -113,24 +116,14 @@ export default function PatientDashboardPage() {
             encryptedDataBuffer: encryptedDataBuffer,
           } as RecordPointer
         })
-.filter(Boolean)
-        // ✅ FIXED FILTER LOGIC
-        .filter((p: RecordPointer) => {
-            // 1. Check for exact match (in case metadata actually stored the address)
-            if (p.patientIdentityKey === walletAddress) return true;
+        .filter(Boolean) // Keep valid objects
+        
+        // ❌ FILTER REMOVED FOR DEBUGGING
+        // .filter((p: RecordPointer) => ... )
 
-            // 2. Check if the stored Key implies the current Wallet Address
-            try {
-                const recordPubKey = PublicKey.fromString(p.patientIdentityKey);
-                const derivedAddress = recordPubKey.toAddress().toString();
-                return derivedAddress === walletAddress;
-            } catch (e) {
-                // If p.patientIdentityKey wasn't a valid pubkey, it's not a match
-                return false;
-            }
-        })
-
+      console.log("✅ Debug: Final processed records list:", pointers);
       setRecords(pointers)
+
     } catch (err) {
       console.error(err)
       setError("Failed to load records from BSV chain.")
