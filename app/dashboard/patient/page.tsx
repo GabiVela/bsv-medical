@@ -46,7 +46,8 @@ export default function PatientDashboardPage() {
       ? `${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}`
       : walletAddress || "Not connected"
 
-const loadRecords = async () => {
+// ⬆️ MAKE SURE YOU HAVE THESE IMPORTS AT THE TOP
+  const loadRecords = async () => {
     setError(null)
     setSelectedRecord(null)
 
@@ -58,16 +59,15 @@ const loadRecords = async () => {
     try {
       setLoadingList(true)
       console.log("🔍 Debug: Fetching records from basket:", ON_CHAIN_BASKET);
-      console.log("👤 Debug: My Wallet Address:", walletAddress);
 
-      // 1️⃣ List all records from the dedicated ON-CHAIN basket
+      // 1️⃣ List all records
       const res = await walletClient.listOutputs({
         basket: ON_CHAIN_BASKET,
         includeCustomInstructions: true,
         limit: 50,
       })
       
-      console.log("📦 Debug: Raw response from wallet:", res);
+      console.log(`📦 Debug: Found ${res.outputs.length} raw outputs.`);
 
       const pointers: RecordPointer[] = (res.outputs || [])
         .map((out: any) => {
@@ -77,7 +77,6 @@ const loadRecords = async () => {
           } catch (e) {
             console.warn("Failed to parse customInstructions:", e)
           }
-          // If no metadata, skip
           if (!meta) return null
 
           const [txid, voutStr] = String(out.outpoint || "").split(".")
@@ -86,18 +85,30 @@ const loadRecords = async () => {
           let encryptedDataBuffer: Buffer | null = null;
           
           try {
-            // 2️⃣ EXTRACT THE ENCRYPTED DATA
+            // 2️⃣ EXTRACT THE ENCRYPTED DATA (SMART SEARCH)
             const script = Script.fromHex(out.lockingScript);
-            const scriptChunks = script.chunks;
-            
-            // Find the index of the protocol prefix
-            const dataStartIndex = scriptChunks.findIndex(
-              (chunk) => chunk.buf && chunk.buf.toString('utf8') === ON_CHAIN_PROTOCOL_PREFIX
-            );
+            const chunks = script.chunks;
 
-            // Grab the chunk immediately after
-            if (dataStartIndex !== -1 && scriptChunks[dataStartIndex + 1] && scriptChunks[dataStartIndex + 1].buf) {
-              encryptedDataBuffer = scriptChunks[dataStartIndex + 1].buf;
+            // Strategy A: Look for "medichain" label
+            const prefixIndex = chunks.findIndex(
+              (c) => c.buf && c.buf.toString('utf8') === ON_CHAIN_PROTOCOL_PREFIX
+            );
+            
+            if (prefixIndex !== -1 && chunks[prefixIndex + 1]?.buf) {
+               encryptedDataBuffer = chunks[prefixIndex + 1].buf;
+            } 
+            // Strategy B: (Fallback) Grab the largest data chunk after OP_RETURN
+            else {
+                const opReturnIndex = chunks.findIndex(c => c.op === 106); // 106 is OP_RETURN
+                if (opReturnIndex !== -1) {
+                    const candidates = chunks.slice(opReturnIndex + 1);
+                    // Sort by size (largest first)
+                    const largest = candidates.sort((a, b) => (b.buf?.length || 0) - (a.buf?.length || 0))[0];
+                    if (largest?.buf && largest.buf.length > 20) {
+                        console.log(`⚠️ Recovered data via fallback size check (${largest.buf.length} bytes)`);
+                        encryptedDataBuffer = largest.buf;
+                    }
+                }
             }
 
           } catch (e) {
@@ -116,14 +127,30 @@ const loadRecords = async () => {
             encryptedDataBuffer: encryptedDataBuffer,
           } as RecordPointer
         })
-        .filter(Boolean) // Keep valid objects
+        .filter(Boolean)
         
-        // ❌ FILTER REMOVED FOR DEBUGGING
-        // .filter((p: RecordPointer) => ... )
+        // 🚨 DEBUG: FILTER REMOVED. 
+        // We will log the comparison instead of hiding the record.
+        .map((p: any) => {
+            // Attempt to derive address from the stored public key
+            let derivedAddress = "invalid-key";
+            try {
+                derivedAddress = PublicKey.fromString(p.patientIdentityKey).toAddress().toString();
+            } catch(e) {}
 
-      console.log("✅ Debug: Final processed records list:", pointers);
+            const isMatch = derivedAddress === walletAddress;
+            
+            console.log(`🔐 Identity Check for Record ${p.recordType}:`);
+            console.log(`   - Record Stored Key: ${p.patientIdentityKey.slice(0,10)}...`);
+            console.log(`   - Derived Address:   ${derivedAddress}`);
+            console.log(`   - My Wallet Address: ${walletAddress}`);
+            console.log(`   - MATCH? ${isMatch ? "✅ YES" : "❌ NO"}`);
+
+            // Return it anyway so you can see it in the UI
+            return p;
+        });
+
       setRecords(pointers)
-
     } catch (err) {
       console.error(err)
       setError("Failed to load records from BSV chain.")
