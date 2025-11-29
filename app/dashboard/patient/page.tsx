@@ -8,8 +8,7 @@ import { WalletButton } from "@/components/wallet-button"
 import { Button } from "@/components/ui/button"
 
 // BSV SDK imports
-import { Utils, Script } from "@bsv/sdk"
-
+import { Utils, Script, PublicKey } from "@bsv/sdk"
 // The basket used for ON-CHAIN storage in the Doctor's code
 const ON_CHAIN_BASKET = "medical-records-on-chain";
 const ON_CHAIN_PROTOCOL_PREFIX = "medichain"; // The identifier placed before the data in the OP_RETURN script
@@ -114,9 +113,22 @@ export default function PatientDashboardPage() {
             encryptedDataBuffer: encryptedDataBuffer,
           } as RecordPointer
         })
-        .filter(Boolean)
-        // Ensure the record is intended for this patient
-        .filter((p: RecordPointer) => p.patientIdentityKey === walletAddress)
+.filter(Boolean)
+        // ✅ FIXED FILTER LOGIC
+        .filter((p: RecordPointer) => {
+            // 1. Check for exact match (in case metadata actually stored the address)
+            if (p.patientIdentityKey === walletAddress) return true;
+
+            // 2. Check if the stored Key implies the current Wallet Address
+            try {
+                const recordPubKey = PublicKey.fromString(p.patientIdentityKey);
+                const derivedAddress = recordPubKey.toAddress().toString();
+                return derivedAddress === walletAddress;
+            } catch (e) {
+                // If p.patientIdentityKey wasn't a valid pubkey, it's not a match
+                return false;
+            }
+        })
 
       setRecords(pointers)
     } catch (err) {
