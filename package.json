@@ -9,6 +9,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@bsv/message-box-client": "^1.4.5",
     "@bsv/sdk": "^1.9.11",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "1.2.2",

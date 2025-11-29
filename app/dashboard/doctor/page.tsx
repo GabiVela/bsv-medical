@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Shield, FilePlus2, Activity, Loader2, XCircle, UserCheck } from "lucide-react"
+import { Shield, FilePlus2, Activity, Loader2, XCircle } from "lucide-react"
 
 import { useWallet } from "@/context/wallet-context"
 import { WalletButton } from "@/components/wallet-button"
@@ -12,6 +12,8 @@ import {
   Utils,
   Random,
   Script,
+  P2PKH,      // 🟢 Added for Payment
+  PublicKey,  // 🟢 Added for Address derivation
   type WalletProtocol,
 } from "@bsv/sdk"
 
@@ -36,7 +38,7 @@ export default function DoctorDashboardPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
-  // 1️⃣ AUTHORIZATION CHECK: Verify wallet against On-Chain Registry
+  // 1️⃣ AUTHORIZATION CHECK
   useEffect(() => {
     const verifyDoctorAccess = async () => {
         if (!isConnected || !walletClient || !walletAddress) {
@@ -48,29 +50,23 @@ export default function DoctorDashboardPage() {
         setAuthStatus("Verifying doctor credentials on-chain...");
 
         try {
-            // Fetch registry outputs (Removed 'sort'/'direction' as they are not supported by SDK)
             const res = await walletClient.listOutputs({
                 basket: REGISTRY_BASKET,
                 includeCustomInstructions: true,
-                // We fetch more than 1 to ensure we can sort client-side if multiple exist
                 limit: 10, 
             });
 
-            // Client-side sort to find the latest based on 'updatedAt' in metadata
+            // Sort by latest timestamp
             const latestOutput = (res.outputs || []).sort((a: any, b: any) => {
                 try {
                     const metaA = JSON.parse(a.customInstructions || '{}');
                     const metaB = JSON.parse(b.customInstructions || '{}');
-                    const timeA = new Date(metaA.updatedAt || 0).getTime();
-                    const timeB = new Date(metaB.updatedAt || 0).getTime();
-                    return timeB - timeA; // Descending (newest first)
-                } catch {
-                    return 0;
-                }
+                    return new Date(metaB.updatedAt || 0).getTime() - new Date(metaA.updatedAt || 0).getTime();
+                } catch { return 0; }
             })[0];
             
             if (!latestOutput || !latestOutput.customInstructions) {
-                setAuthStatus("Registry not found or empty.");
+                setAuthStatus("Registry not found.");
                 setIsAuthorized(false);
                 return;
             }
@@ -78,15 +74,13 @@ export default function DoctorDashboardPage() {
             const metadata = JSON.parse(latestOutput.customInstructions);
             const doctors = metadata.doctors || [];
             
-            // Check if the connected wallet is in the list
             const isRegistered = doctors.some((d: any) => d.key === walletAddress);
-            
             setIsAuthorized(isRegistered);
             setAuthStatus(isRegistered ? "Authorized" : "Not Registered");
 
         } catch (err) {
             console.error("Auth check failed:", err);
-            setAuthStatus("Failed to verify registry.");
+            setAuthStatus("Verification failed.");
             setIsAuthorized(false);
         } finally {
             setIsCheckingAuth(false);
@@ -97,38 +91,27 @@ export default function DoctorDashboardPage() {
   }, [isConnected, walletClient, walletAddress]);
 
 
-  // 2️⃣ HANDLE RECORD CREATION
+  // 2️⃣ HANDLE RECORD CREATION (The Robust Version)
+// 2️⃣ HANDLE RECORD CREATION (Final Fix)
   const handleCreateRecord = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitError(null)
     setSubmitSuccess(null)
 
-    // 🟢 FIX: Explicitly check if walletClient exists to satisfy TypeScript
-    if (!walletClient) {
-        setSubmitError("Wallet not connected.")
-        return
-    }
+    if (!walletClient) { setSubmitError("Wallet not connected."); return; }
+    if (!isAuthorized) { setSubmitError("Unauthorized."); return; }
+    if (!patientId.trim()) { setSubmitError("Please enter Patient Public Key."); return; }
+    if (!notes.trim()) { setSubmitError("Please enter notes."); return; }
 
-    if (!isAuthorized) {
-        setSubmitError("Unauthorized: You are not a registered doctor.")
-        return
-    }
-
-    if (!patientId.trim()) {
-      setSubmitError("Please enter a patient ID or identity key.")
-      return
-    }
-
-    if (!notes.trim()) {
-      setSubmitError("Please enter clinical notes.")
-      return
+    if (!patientId.startsWith('02') && !patientId.startsWith('03')) {
+        setSubmitError("Invalid Patient ID. Must be a Public Key (starts with 02/03).");
+        return;
     }
 
     setIsSubmitting(true)
 
     try {
       const createdAt = new Date().toISOString()
-
       const record = {
         patientIdentityKey: patientId,
         doctorIdentityKey: walletAddress,
@@ -136,66 +119,64 @@ export default function DoctorDashboardPage() {
         createdAt,
         body: { notes },
       }
-
       const recordJson = JSON.stringify(record)
 
+      // A. Encrypt
       const keyID = Utils.toBase64(Random(8))
       const protocolID: WalletProtocol = [1, "medichain record v1"]
-      const counterparty = patientId
-
+      
       const { ciphertext } = await walletClient.encrypt({
         plaintext: Utils.toArray(recordJson, "utf8"),
-        counterparty,
+        counterparty: patientId,
         keyID,
         protocolID,
       })
       
-      const encryptedDataBuffer = Buffer.from(ciphertext);
+      // B. Create Output 1: The Data (ASM Method)
+      // 🟢 FIX: Convert data to Hex strings first, then use fromASM.
+      // This avoids the "Property 'op' is missing" error AND the "Odd Length" error.
+      
+      const protocolHex = Utils.toHex(Utils.toArray(ON_CHAIN_PROTOCOL_PREFIX, "utf8"));
+      const dataHex = Utils.toHex(ciphertext); // Convert number[] to Hex String
 
-      const description = `ON-CHAIN Encrypted ${recordType} for patient`
+      // The SDK will automatically calculate the correct PUSHDATA opcodes for the hex data
+      const opReturnScript = Script.fromASM(
+          `OP_0 OP_RETURN ${protocolHex} ${dataHex}`
+      );
+      
+      const opReturnScriptHex = opReturnScript.toHex();
 
-      const opReturnScript = Script.fromASM([
-        "OP_0", 
-        "OP_RETURN",
-        Utils.toHex(Utils.toArray(ON_CHAIN_PROTOCOL_PREFIX, "utf8")),
-        encryptedDataBuffer.toString("hex"),
-      ].join(' ')).toHex();
+      // C. Create Output 2: The Notification
+      const patientAddress = PublicKey.fromString(patientId).toAddress();
+      const paymentScriptHex = new P2PKH().lock(patientAddress).toHex();
 
+      // D. Broadcast
       const actionResult = await walletClient.createAction({
-        description,
+        description: `Medical Record for ${patientId.slice(0,6)}...`,
         outputs: [
           {
             satoshis: 0,
-            lockingScript: opReturnScript,
+            lockingScript: opReturnScriptHex,
             basket: ON_CHAIN_BASKET,
-            outputDescription: "ON-CHAIN Encrypted Medical Record",
-            customInstructions: JSON.stringify({
-              protocolID,
-              keyID,
-              recordType,
-              createdAt,
-              doctorIdentityKey: walletAddress,
-              patientIdentityKey: patientId,
-              version: "medichain-record-onchain-v1",
-            }),
+            outputDescription: "Medical Data",
           },
+          {
+            satoshis: 1000,
+            lockingScript: paymentScriptHex,
+            basket: ON_CHAIN_BASKET,
+            outputDescription: "Patient Notification",
+          }
         ],
       })
 
       const txid = (actionResult as any)?.txid ?? (actionResult as any)?.transactionId
 
-      setSubmitSuccess(
-        txid
-          ? `Record created & permanently stored ON-CHAIN. TXID: ${txid}`
-          : "Record created successfully."
-      )
-
+      setSubmitSuccess(txid ? `Success! TXID: ${txid}` : "Record created.")
       setNotes("")
+      
     } catch (err) {
       console.error(err)
-      setSubmitError(
-        err instanceof Error ? err.message : "Something went wrong while creating the record.",
-      )
+      setSubmitError(err instanceof Error ? err.message : "Error creating record.")
     } finally {
       setIsSubmitting(false)
     }
@@ -206,7 +187,6 @@ export default function DoctorDashboardPage() {
       ? `${walletAddress.slice(0, 10)}...${walletAddress.slice(-8)}`
       : walletAddress || "Not connected"
 
-  // 3️⃣ RENDER LOADING STATE
   if (isCheckingAuth && isConnected) {
       return (
         <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center">
@@ -218,7 +198,6 @@ export default function DoctorDashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
-      {/* Top Nav */}
       <nav className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Shield className="w-7 h-7 text-blue-400" />
@@ -231,13 +210,10 @@ export default function DoctorDashboardPage() {
       </nav>
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
-        {/* Doctor identity / status */}
+        {/* Identity & Status */}
         <section className="grid gap-4 md:grid-cols-3">
           <div className="md:col-span-2 bg-slate-800/60 border border-slate-700 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-2">Doctor Identity</h2>
-            <p className="text-sm text-slate-300 mb-4">
-              Your actions are signed using your BSV identity key.
-            </p>
             <div className="text-xs text-slate-300">
               <div className="font-semibold mb-1">Identity Public Key</div>
               <code className="block bg-slate-900/80 border border-slate-700 rounded px-3 py-2 break-all">
@@ -250,20 +226,16 @@ export default function DoctorDashboardPage() {
             <div className="flex items-center gap-3 mb-4">
               <Activity className="w-6 h-6 text-emerald-400" />
               <div>
-                <div className="text-sm text-slate-400">Authorization Status</div>
+                <div className="text-sm text-slate-400">Status</div>
                 <div className={`text-base font-semibold ${isAuthorized ? 'text-green-400' : 'text-red-400'}`}>
                   {isConnected ? (isAuthorized ? "Verified Doctor" : "Unauthorized") : "Wallet Not Connected"}
                 </div>
               </div>
             </div>
-            <p className="text-xs text-slate-400">
-              Connected as:{" "}
-              <span className="font-mono text-[11px]">{shortIdentity}</span>
-            </p>
+            <p className="text-xs text-slate-400">Connected as: <span className="font-mono text-[11px]">{shortIdentity}</span></p>
           </div>
         </section>
 
-        {/* 4️⃣ CONDITIONAL RENDER: ACCESS DENIED vs DASHBOARD */}
         {!isConnected ? (
              <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-8 text-center">
                 <p className="text-slate-400">Please connect your BSV wallet to verify your doctor credentials.</p>
@@ -274,42 +246,34 @@ export default function DoctorDashboardPage() {
                 <h2 className="text-2xl font-bold text-red-400">Access Restricted</h2>
                 <p className="text-slate-300 max-w-lg">
                     This dashboard is restricted to registered medical practitioners. 
-                    Your wallet address (<strong>{shortIdentity}</strong>) was not found in the official MediChain Doctor Registry.
-                </p>
-                <p className="text-sm text-slate-500">
-                    Please contact the administrator to have your public key added to the registry.
+                    Your key (<strong>{shortIdentity}</strong>) is not in the registry.
                 </p>
             </section>
         ) : (
             <>
-                {/* Create new record - ONLY VISIBLE IF AUTHORIZED */}
                 <section className="bg-slate-800/60 border border-slate-700 rounded-xl p-6 space-y-4">
                 <div className="flex items-center gap-2 mb-2">
                     <FilePlus2 className="w-5 h-5 text-blue-400" />
                     <h2 className="text-xl font-semibold">Create New Medical Record (ON-CHAIN)</h2>
                 </div>
                 <p className="text-sm text-slate-300 mb-4">
-                    Create an encrypted medical record. The data is stored immutably on the BSV blockchain.
+                    Create an encrypted record. A notification (1000 sats) will be sent to the patient's wallet.
                 </p>
 
                 <form onSubmit={handleCreateRecord} className="space-y-4">
                     <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-200">
-                        Patient MediChain ID (Identity Public Key)
-                    </label>
+                    <label className="text-sm font-medium text-slate-200">Patient Identity Key (Public Key)</label>
                     <input
                         type="text"
                         value={patientId}
                         onChange={(e) => setPatientId(e.target.value)}
-                        placeholder="e.g. 02abc... (patient identity key)"
-                        className="w-full px-3 py-2 rounded-md bg-slate-900/80 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Paste Patient Public Key (starts with 02...)"
+                        className="w-full px-3 py-2 rounded-md bg-slate-900/80 border border-slate-700 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     </div>
 
                     <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-200">
-                        Record Type
-                    </label>
+                    <label className="text-sm font-medium text-slate-200">Record Type</label>
                     <select
                         value={recordType}
                         onChange={(e) => setRecordType(e.target.value)}
@@ -319,52 +283,30 @@ export default function DoctorDashboardPage() {
                         <option value="lab_result">Lab Result</option>
                         <option value="prescription">Prescription</option>
                         <option value="imaging_report">Imaging Report</option>
-                        <option value="other">Other</option>
                     </select>
                     </div>
 
                     <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-200">
-                        Clinical Notes
-                    </label>
+                    <label className="text-sm font-medium text-slate-200">Clinical Notes</label>
                     <textarea
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
                         rows={4}
-                        placeholder="Brief description, diagnosis, treatment plan, etc."
-                        className="w-full px-3 py-2 rounded-md bg-slate-900/80 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Diagnosis, treatment plan, etc."
+                        className="w-full px-3 py-2 rounded-md bg-slate-900/80 border border-slate-700 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     </div>
 
-                    {submitError && (
-                    <div className="text-xs text-red-400 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">
-                        {submitError}
-                    </div>
-                    )}
-                    {submitSuccess && (
-                    <div className="text-xs text-emerald-400 border border-emerald-500/40 bg-emerald-500/10 rounded px-3 py-2">
-                        {submitSuccess}
-                    </div>
-                    )}
+                    {submitError && <div className="text-xs text-red-400 border border-red-500/40 bg-red-500/10 rounded px-3 py-2">{submitError}</div>}
+                    {submitSuccess && <div className="text-xs text-emerald-400 border border-emerald-500/40 bg-emerald-500/10 rounded px-3 py-2">{submitSuccess}</div>}
 
                     <div className="flex justify-end">
-                    <Button
-                        type="submit"
-                        disabled={isSubmitting || !isConnected}
-                        className="flex items-center gap-2"
-                    >
+                    <Button type="submit" disabled={isSubmitting || !isConnected} className="flex items-center gap-2">
                         {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {isSubmitting ? "Creating ON-CHAIN Record..." : "Create & Send ON-CHAIN"}
+                        {isSubmitting ? "Broadcasting..." : "Create Record"}
                     </Button>
                     </div>
                 </form>
-                </section>
-
-                <section className="bg-slate-800/40 border border-slate-800 rounded-xl p-6">
-                <h2 className="text-lg font-semibold mb-2">Recent Records</h2>
-                <p className="text-sm text-slate-400">
-                    Your recent on-chain entries will appear here.
-                </p>
                 </section>
             </>
         )}
