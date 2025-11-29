@@ -1,20 +1,24 @@
 "use client"
 
 import Link from "next/link"
-import { Lock, FileText, Share2, Smartphone, Shield, ArrowRight } from "lucide-react"
+import { Lock, FileText, Share2, Smartphone, Shield, ArrowRight, UserCog } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { WalletButton } from "@/components/wallet-button"
 import { useWallet } from "@/context/wallet-context"
 
 export default function LandingPage() {
-  const { isConnected, isConnecting, connectWallet } = useWallet()
+  const { isConnected, isConnecting, connectWallet, walletAddress } = useWallet()
 
   const handleConnectClick = async () => {
     if (!isConnected && !isConnecting) {
       await connectWallet()
     }
   }
+  
+  // Hardcoded Admin Key for conditional rendering (026e845...)
+  const ADMIN_PUBKEY = '026e845dfa6861d663706f31a6d1b1d3537ed8d4258fb5cd0ff699b8a79f3ac316';
+  const isAdmin = isConnected && walletAddress === ADMIN_PUBKEY;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -25,9 +29,16 @@ export default function LandingPage() {
           <span className="text-xl font-bold text-white">MediChain</span>
         </div>
         <div className="flex items-center gap-4">
-          <Link href="/login" className="text-slate-300 hover:text-white transition">
-            Sign In
-          </Link>
+          {/* NEW: Conditional Link to Admin Page (Only visible to Admin) */}
+          {isAdmin && (
+             <Link href="/admin" className="inline-flex">
+                <button className="text-red-400 hover:text-red-300 transition flex items-center gap-1 text-sm font-medium">
+                    <UserCog className="w-4 h-4" />
+                    Admin Panel
+                </button>
+             </Link>
+          )}
+          {/* Wallet Button handles the actual sign-in/connection display */}
           <WalletButton />
         </div>
       </nav>
@@ -44,7 +55,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-wrap gap-4">
-            {/* Connect Wallet */}
+            {/* Connect Wallet Button */}
             <Button
               onClick={handleConnectClick}
               disabled={isConnecting || isConnected}
@@ -58,17 +69,17 @@ export default function LandingPage() {
               {!isConnected && <ArrowRight className="w-4 h-4" />}
             </Button>
 
-            {/* Doctor Dashboard Button (only visible AFTER wallet connects) */}
+            {/* Doctor Dashboard Button - Only visible when connected */}
             {isConnected && (
               <Link href="/dashboard/doctor" className="inline-flex">
                 <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition">
-                  Doctor Dashboard
+                  Go to Doctor Dashboard
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </Link>
             )}
 
-            {/* Learn More */}
+            {/* Learn More Button */}
             <Link href="/learn" className="inline-flex">
               <button className="border border-slate-600 text-slate-300 hover:text-white px-6 py-3 rounded-lg transition">
                 Learn More
@@ -77,11 +88,11 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* Phone graphic */}
+        {/* Hero Graphic */}
         <div className="flex-1 relative h-96 flex items-center justify-center">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-full blur-3xl" />
           <div className="relative flex items-center justify-center">
-            <div className="w-64 h-64 border-2 border-blue-500/30 rounded-2xl flex items-center justify-center">
+            <div className="w-64 h-64 border-2 border-blue-500/30 rounded-2xl flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
               <Smartphone className="w-32 h-32 text-blue-400" />
             </div>
           </div>
