@@ -28,7 +28,6 @@ export default function LandingPage() {
           <Link href="/login" className="text-slate-300 hover:text-white transition">
             Sign In
           </Link>
-          {/* Use the same BRC-100 / Metanet wallet button as your other page */}
           <WalletButton />
         </div>
       </nav>
@@ -43,8 +42,9 @@ export default function LandingPage() {
             Control your medical records with your BSV wallet. Grant access to providers and pharmacies
             with complete transparency and security.
           </p>
+
           <div className="flex flex-wrap gap-4">
-            {/* Primary CTA: Connect Wallet */}
+            {/* Connect Wallet */}
             <Button
               onClick={handleConnectClick}
               disabled={isConnecting || isConnected}
@@ -58,7 +58,17 @@ export default function LandingPage() {
               {!isConnected && <ArrowRight className="w-4 h-4" />}
             </Button>
 
-            {/* Secondary CTA: go to app / docs */}
+            {/* Doctor Dashboard Button (only visible AFTER wallet connects) */}
+            {isConnected && (
+              <Link href="/dashboard/doctor" className="inline-flex">
+                <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition">
+                  Doctor Dashboard
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </Link>
+            )}
+
+            {/* Learn More */}
             <Link href="/learn" className="inline-flex">
               <button className="border border-slate-600 text-slate-300 hover:text-white px-6 py-3 rounded-lg transition">
                 Learn More
@@ -67,6 +77,7 @@ export default function LandingPage() {
           </div>
         </div>
 
+        {/* Phone graphic */}
         <div className="flex-1 relative h-96 flex items-center justify-center">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-full blur-3xl" />
           <div className="relative flex items-center justify-center">
