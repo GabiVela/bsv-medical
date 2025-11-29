@@ -53,11 +53,21 @@ const connectWallet = useCallback(async () => {
         throw new Error("Metanet Desktop not available")
       })
 
+    // ✅ Save client
     setWalletClient(client)
-    setIsConnected(true)
 
-    setWalletAddress(null)
+    // ✅ Get identity public key from wallet → use as "address"
+    try {
+      const { publicKey } = await client.getPublicKey({ identityKey: true })
+      setWalletAddress(publicKey)
+    } catch (e) {
+      console.error("Failed to get identity key:", e)
+      setWalletAddress(null)
+    }
+
+    // You can later compute real balance via listOutputs, etc.
     setBalance(null)
+    setIsConnected(true)
   } catch (err) {
     console.error("Wallet connection error:", err)
     setWalletClient(null)
@@ -69,6 +79,7 @@ const connectWallet = useCallback(async () => {
     setIsConnecting(false)
   }
 }, [])
+
 
 
   const disconnectWallet = useCallback(() => {
