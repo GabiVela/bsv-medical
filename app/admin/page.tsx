@@ -37,42 +37,66 @@ export default function AdminPage() {
   const [adminSuccess, setAdminSuccess] = useState<string | null>(null)
 
   // 1. LOAD DOCTOR REGISTRY LIST FROM BSV CHAIN
-  const loadRegistry = useCallback(async () => {
-    if (!walletClient || !isConnected) return
-    setRoleStatus("Loading registry...")
-    setAdminError(null)
+const loadRegistry = useCallback(async () => {
+    if (!walletClient || !isConnected) return;
+    setRoleStatus("Loading registry...");
+    setAdminError(null);
 
     try {
+      // 1. Fetch MORE than 1 output to ensure we don't miss the new one due to sorting issues
       const res = await walletClient.listOutputs({
         basket: REGISTRY_BASKET,
         includeCustomInstructions: true,
-        limit: 1, // only need the most recent state
-        sort: "vout",
-        direction: "desc",
-      })
+        limit: 10, // Fetch top 10 to be safe
+      });
+      
+      const outputs = res.outputs || [];
 
-      const latestOutput = res.outputs?.[0]
-
-      if (!latestOutput || !latestOutput.customInstructions) {
-        setRegistryList([])
-        setLatestRegistryTxid(null)
-        setRoleStatus("Registry initialized, but empty.")
-        return
+      if (outputs.length === 0) {
+        setRegistryList([]);
+        setLatestRegistryTxid(null);
+        setRoleStatus("Registry initialized, but empty (or syncing).");
+        return;
       }
 
-      const metadata = JSON.parse(latestOutput.customInstructions)
-      setRegistryList(metadata.doctors || [])
-      setLatestRegistryTxid(latestOutput.outpoint.split(".")[0])
-      setRoleStatus(
-        `Registry loaded: ${metadata.doctors?.length || 0} doctors found.`,
-      )
-    } catch (err) {
-      console.error("Failed to load doctor registry:", err)
-      setRoleStatus("Failed to load registry. Check wallet service connection.")
-      setAdminError("Failed to fetch registry data. Please try refreshing.")
-    }
-  }, [walletClient, isConnected])
+      // 2. MANUAL SORTING: Trust the data, not the blockchain sort order
+      // We parse all outputs and find the one with the most recent 'updatedAt' timestamp
+      const validRegistries = outputs.map((out: any) => {
+          try {
+              const meta = JSON.parse(out.customInstructions);
+              // Ensure it's actually our registry data
+              if (!meta.doctors || !meta.updatedAt) return null;
+              
+              return {
+                  meta,
+                  txid: out.outpoint ? out.outpoint.split('.')[0] : 'unknown',
+                  timestamp: new Date(meta.updatedAt).getTime()
+              };
+          } catch (e) { return null; }
+      }).filter(Boolean); // Remove nulls
 
+      if (validRegistries.length === 0) {
+           setRoleStatus("No valid registry data found.");
+           return;
+      }
+
+      // 3. Sort Descending by Time (Newest First)
+      validRegistries.sort((a, b) => (b?.timestamp || 0) - (a?.timestamp || 0));
+
+      const latest = validRegistries[0]; // This is the winner
+
+      if (latest) {
+          setRegistryList(latest.meta.doctors || []);
+          setLatestRegistryTxid(latest.txid);
+          setRoleStatus(`Registry loaded: ${latest.meta.doctors?.length || 0} doctors found.`);
+          console.log("✅ Loaded Registry Version:", latest.meta.updatedAt);
+      }
+
+    } catch (err) {
+      console.error("Failed to load doctor registry:", err);
+      setRoleStatus("Failed to load registry.");
+    }
+  }, [walletClient, isConnected]);
   useEffect(() => {
     if (isConnected && walletClient) {
       void loadRegistry()

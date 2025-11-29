@@ -41,22 +41,58 @@ const connectWallet = useCallback(async () => {
   setError(null)
 
   try {
-    const client = new WalletClient()
+    let client: WalletClient | null = null
 
-    // 🔹 Ping Metanet Desktop to verify it's available.
-    await client
-      .listOutputs({
-        basket: "micro-contracts", // required by ListOutputsArgs
+    // ---------------------------------------------------------
+    // 1️⃣ ATTEMPT 1: Try Default Port (3301)
+    // ---------------------------------------------------------
+    try {
+      console.log("🔌 Attempting connection on default port (3301)...")
+      const candidate = new WalletClient() // Default behavior
+
+      // Ping to verify
+      await candidate.listOutputs({
+        basket: "micro-contracts",
         limit: 1,
       })
-      .catch(() => {
-        throw new Error("Metanet Desktop not available")
-      })
+      
+      client = candidate
+      console.log("✅ Connected on Port 3301")
+    } catch (err3301) {
+      console.warn("⚠️ Port 3301 failed. Falling through to Port 3321...")
+    }
 
-    // ✅ Save client
+    // ---------------------------------------------------------
+    // 2️⃣ ATTEMPT 2: Fallback to BSV Desktop Port (3321)
+    // ---------------------------------------------------------
+    if (!client) {
+      try {
+        console.log("🔌 Attempting connection on fallback port (3321)...")
+        // Force URL to 3321
+        const candidate = new WalletClient({ 
+            url: "http://localhost:3321" 
+        } as any)
+
+        // Ping to verify
+        await candidate.listOutputs({
+          basket: "micro-contracts",
+          limit: 1,
+        })
+
+        client = candidate
+        console.log("✅ Connected on Port 3321")
+      } catch (err3321) {
+        // If both fail, we throw the final error
+        throw new Error("Desktop Agent not found on port 3301 OR 3321.")
+      }
+    }
+
+    // ---------------------------------------------------------
+    // ✅ SUCCESS: We have a working client
+    // ---------------------------------------------------------
     setWalletClient(client)
 
-    // ✅ Get identity public key from wallet → use as "address"
+    // Get identity public key
     try {
       const { publicKey } = await client.getPublicKey({ identityKey: true })
       setWalletAddress(publicKey)
@@ -65,16 +101,16 @@ const connectWallet = useCallback(async () => {
       setWalletAddress(null)
     }
 
-    // You can later compute real balance via listOutputs, etc.
     setBalance(null)
     setIsConnected(true)
+
   } catch (err) {
     console.error("Wallet connection error:", err)
     setWalletClient(null)
     setIsConnected(false)
     setWalletAddress(null)
     setBalance(null)
-    setError("Failed to connect. Please open Metanet Desktop and unlock it.")
+    setError("Failed to connect. Please ensure Babbage Desktop (3301) or BSV Desktop (3321) is running.")
   } finally {
     setIsConnecting(false)
   }
