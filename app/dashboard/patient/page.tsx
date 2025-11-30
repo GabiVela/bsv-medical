@@ -214,7 +214,7 @@ export default function PatientDashboardPage() {
     try {
       setSendingPdf(true)
       setStatus("Sending PDF via email...")
-      const res = await fetch("http://localhost:8000/export-pdf", {
+      const res = await fetch("https://c35a227fcd5f.ngrok-free.app/export-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
