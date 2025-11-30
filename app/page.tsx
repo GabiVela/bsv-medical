@@ -25,7 +25,7 @@ export default function LandingPage() {
   }
 
   // ✅ Admin key from env (must be NEXT_PUBLIC_ for client use)
-  const ADMIN_PUBKEY = process.env.NEXT_PUBLIC_ADMIN_PUBKEY
+  const ADMIN_PUBKEY = "026e845dfa6861d663706f31a6d1b1d3537ed8d4258fb5cd0ff699b8a79f3ac316"
   const isAdmin = isConnected && ADMIN_PUBKEY && walletAddress === ADMIN_PUBKEY
 
   return (
