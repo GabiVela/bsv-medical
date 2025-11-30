@@ -41,6 +41,9 @@ export default function PatientDashboardPage() {
   // id -> decrypted record object
   const [decryptedMap, setDecryptedMap] = useState<Record<string, any>>({})
 
+  // ❗ NEW: track which records failed decryption
+  const [failedDecrypt, setFailedDecrypt] = useState<Record<string, boolean>>({})
+
   // email + pdf sending
   const [email, setEmail] = useState("")
   const [sendingPdf, setSendingPdf] = useState(false)
@@ -66,6 +69,8 @@ export default function PatientDashboardPage() {
       const recs: StoredRecord[] = data.records || []
       setRecords(recs)
       setStatus(`Loaded ${recs.length} record(s).`)
+      // reset failure map when refetching
+      setFailedDecrypt({})
     } catch (e) {
       console.error("Fetch records error:", e)
       setStatus("Failed to load records.")
@@ -131,10 +136,16 @@ export default function PatientDashboardPage() {
       setSelectedRecord(parsed)
       setSelectedMeta(rec)
       setDecryptedMap((prev) => ({ ...prev, [rec.id]: parsed }))
+      setFailedDecrypt((prev) => {
+        const copy = { ...prev }
+        delete copy[rec.id]
+        return copy
+      })
       setStatus("Decrypted successfully.")
     } catch (e) {
       console.error("Decrypt error:", e)
-      setStatus("Decryption failed.")
+      setFailedDecrypt((prev) => ({ ...prev, [rec.id]: true }))
+      setStatus("Decryption failed for this record.")
     } finally {
       setDecryptingId(null)
     }
@@ -146,6 +157,7 @@ export default function PatientDashboardPage() {
     setStatus("Batch decrypting all records...")
 
     const newMap: Record<string, any> = {}
+    const failureMap: Record<string, boolean> = {}
 
     try {
       for (const rec of records) {
@@ -154,11 +166,20 @@ export default function PatientDashboardPage() {
           newMap[rec.id] = parsed
         } catch (e) {
           console.error("Batch decrypt failed for", rec.id, e)
+          failureMap[rec.id] = true
         }
       }
 
       setDecryptedMap((prev) => ({ ...prev, ...newMap }))
-      setStatus(`Decrypted ${Object.keys(newMap).length} record(s).`)
+      setFailedDecrypt((prev) => ({ ...prev, ...failureMap }))
+
+      const successCount = Object.keys(newMap).length
+      const failCount = Object.keys(failureMap).length
+      setStatus(
+        `Decrypted ${successCount} record(s).${
+          failCount ? ` ${failCount} could not be decrypted (different wallet or old format).` : ""
+        }`,
+      )
     } finally {
       setBatchDecrypting(false)
     }
@@ -240,7 +261,7 @@ export default function PatientDashboardPage() {
           <div className="flex flex-col gap-3 bg-slate-800 p-4 rounded mb-6 border border-slate-700">
             <div className="flex justify-between items-center gap-4">
               <div className="flex items-center gap-2">
-                {(loading || batchDecrypting || sendingPdf) ? (
+                {loading || batchDecrypting || sendingPdf ? (
                   <Loader2 className="w-4 h-4 animate-spin text-yellow-400" />
                 ) : (
                   <span className="w-2 h-2 rounded-full bg-green-400" />
@@ -316,14 +337,6 @@ export default function PatientDashboardPage() {
                         {rec.recordType || "Record"}
                       </div>
 
-                      {/* Doctor address in full */}
-                      <div className="text-xs text-slate-400 mt-1">
-                        Doctor:
-                        <code className="block font-mono text-[11px] break-all bg-slate-900/60 border border-slate-700 rounded px-2 py-1 mt-1">
-                          {rec.doctorIdentityKey}
-                        </code>
-                      </div>
-
                       <div className="text-xs text-slate-500 mt-1">
                         {new Date(rec.createdAt).toLocaleString()}
                       </div>
@@ -332,7 +345,9 @@ export default function PatientDashboardPage() {
                       size="sm"
                       variant="outline"
                       onClick={() => handleDecrypt(rec)}
-                      disabled={decryptingId === rec.id || batchDecrypting || sendingPdf}
+                      disabled={
+                        decryptingId === rec.id || batchDecrypting || sendingPdf
+                      }
                       className="text-slate-100 border-slate-500 hover:bg-slate-800 hover:text-white"
                     >
                       {decryptingId === rec.id ? (
@@ -357,6 +372,14 @@ export default function PatientDashboardPage() {
                         {decrypted.body?.notes ||
                           JSON.stringify(decrypted, null, 2)}
                       </div>
+                    </div>
+                  )}
+
+                  {/* ❗ Show message for records that failed decryption */}
+                  {failedDecrypt[rec.id] && (
+                    <div className="mt-2 text-[11px] text-red-400">
+                      Could not decrypt this record. It may belong to a
+                      different wallet or use an older encryption format.
                     </div>
                   )}
                 </div>
