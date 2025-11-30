@@ -14,9 +14,15 @@ import { WalletButton } from "@/components/wallet-button"
 import { Button } from "@/components/ui/button"
 import { Utils } from "@bsv/sdk"
 
+import { ElevenLabsClient } from 'elevenlabs';
+
 // ⚙️ Must match doctor page
 const MEDICHAIN_PROTOCOL_ID = [1, "medichain record v1"] as [any, string]
 const MEDICHAIN_KEY_ID = "medichainKey1"
+
+console.log('API_KEY: '+process.env.ELEVENLABS_API_KEY);
+
+const eleven_client = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
 
 type StoredRecord = {
   id: string
@@ -26,6 +32,29 @@ type StoredRecord = {
   recordType: string
   createdAt: string
 }
+
+function MedicalRecord({ recordText }: { recordText: string }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const speak = async () => {
+    const audio = await eleven_client.textToSpeech.convert({
+      text: recordText,
+      voiceId: '21m00Tcm4TlvDq8ikWAM', // e.g., default voice [web:4]
+      modelId: 'eleven_monolingual_v1'
+    });
+    const utterance = new SpeechSynthesisUtterance(recordText); // Fallback browser TTS
+    speechSynthesis.speak(utterance);
+    setIsPlaying(true);
+  };
+  return (
+    <div role="article" aria-label="Medical record">
+      <p>{recordText}</p>
+      <button onClick={speak} aria-label="Read aloud" disabled={isPlaying}>
+        🔊 Play Audio
+      </button>
+    </div>
+  );
+}
+
 
 export default function PatientDashboardPage() {
   const { walletAddress, walletClient, isConnected } = useWallet()
